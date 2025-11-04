@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Salto em 3D - Guia Interativo de Padrões de Preenchimento</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chosen Palette: Tech Modern (Orange Theme) -->
+    <!-- Application Structure Plan: A SPA designed as an interactive reference guide. The structure follows a logical discovery flow: 1) A clear header and introduction. 2) An 'Explorer' section with primary filters based on the report's categories (2D, 3D, Especial), allowing users to immediately narrow the scope. 3) A dynamic grid of interactive cards, each representing an infill pattern with a visual preview. Clicking a card reveals detailed information in a modal window. 4) A powerful 'Comparison Tool' where users can select up to three patterns. Their stats are visualized on a radar chart for easy comparison of trade-offs, with qualitative pros and cons listed below. This structure was chosen to transform a static text document into a functional tool, guiding the user from broad exploration to specific, data-driven comparison and decision-making. -->
+    <!-- Visualization & Content Choices:
+    - Report Info: Pattern Categories -> Goal: Organize -> Viz/Presentation: Filter Buttons -> Interaction: Click to filter grid -> Justification: Provides a high-level, intuitive navigation based on the source report's structure. Method: Vanilla JS.
+    - Report Info: Visual structure of each pattern -> Goal: Inform -> Viz/Presentation: Canvas-based visual previews on cards -> Interaction: Static -> Justification: Gives a quick, scannable visual representation of each pattern. Method: Canvas 2D API.
+    - Report Info: Detailed pattern descriptions -> Goal: Inform -> Viz/Presentation: Modal Window -> Interaction: Click card to open -> Justification: Uses progressive disclosure to keep the main interface clean while providing deep-dive information on demand. Method: HTML/Tailwind/JS.
+    - Report Info: Comparative attributes (Vantagens/Desvantagens) -> Goal: Compare -> Viz/Presentation: Radar Chart and side-by-side text -> Interaction: Select patterns via checkboxes to update chart -> Justification: A radar chart is the most effective way to visually compare multiple quantitative attributes (derived from the text) across several items simultaneously. The text below provides the qualitative context. Library: Chart.js.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        html { scroll-behavior: smooth; }
+        body { background-color: #f0f2f5; font-family: 'Inter', sans-serif; color: #1a202c; }
+        .chart-container { position: relative; width: 100%; max-width: 600px; margin: auto; height: 350px; max-height: 45vh; }
+        @media (min-width: 1024px) { .chart-container { height: 400px; } }
+        .btn-filter.active { background-color: #ea580c; color: white; }
+        .modal { display: none; }
+        .modal.is-open { display: flex; }
+        .card-canvas {
+            width: 100%;
+            height: 6rem; /* 96px */
+            border: 1px solid #e2e8f0;
+            border-radius: 0.5rem;
+            background-color: #ffffff;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #f97316;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Header Animation */
+        header {
+            transition: padding 0.3s ease-out;
+        }
+        header h1, header p {
+            transition: all 0.3s ease-out;
+        }
+        .header-scrolled {
+            padding-top: 0.5rem; /* 8px */
+            padding-bottom: 0.5rem; /* 8px */
+        }
+        .header-scrolled h1 {
+            font-size: 1.875rem; /* text-3xl */
+        }
+        .header-scrolled p {
+            font-size: 1rem; /* text-base */
+            opacity: 0;
+            height: 0;
+            margin: 0;
+            overflow: hidden;
+        }
+        
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-fade-in-down {
+            animation: fadeInDown 0.6s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div id="modal-template" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div class="p-6">
+                <div class="flex justify-between items-center border-b pb-3">
+                    <h3 id="modal-title" class="text-2xl font-bold text-gray-800"></h3>
+                    <button id="modal-close" class="text-gray-500 hover:text-gray-800 text-3xl leading-none">&times;</button>
+                </div>
+                <div class="mt-4 space-y-4">
+                    <div>
+                        <h4 class="font-semibold text-orange-600">Como funciona:</h4>
+                        <p id="modal-how" class="text-gray-700"></p>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold text-orange-600">Ideal para:</h4>
+                        <p id="modal-ideal" class="text-gray-700"></p>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="bg-green-50 p-3 rounded-lg border border-green-200">
+                            <h4 class="font-semibold text-green-700">Vantagens:</h4>
+                            <p id="modal-advantages" class="text-green-800"></p>
+                        </div>
+                        <div class="bg-red-50 p-3 rounded-lg border border-red-200">
+                             <h4 class="font-semibold text-red-700">Desvantagens:</h4>
+                            <p id="modal-disadvantages" class="text-red-800"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <header class="bg-white shadow-md sticky top-0 z-40">
+        <div class="container mx-auto px-6 py-5 text-center">
+            <h1 class="text-4xl font-bold text-gray-800">Guia Interativo de Preenchimento para a <span class="text-orange-600">Salto em 3D</span></h1>
+            <p class="mt-2 text-lg text-gray-600">Explore, compare e escolha a estrutura interna ideal para seu projeto.</p>
+        </div>
+    </header>
+
+    <main class="container mx-auto p-6">
+
+        <section id="intro" class="my-10 bg-white p-8 rounded-xl shadow-lg">
+            <div class="grid md:grid-cols-2 gap-8 items-center">
+                <div>
+                    <h2 class="text-3xl font-bold text-gray-800">Da Ideia à Realidade com a <span class="text-orange-600">Salto em 3D</span></h2>
+                    <p class="mt-4 text-gray-600">Localizada no coração criativo de Salto-SP, no <strong>Espaço do Artesão</strong>, somos especialistas em transformar suas ideias em objetos concretos. Não importa o desafio, nós temos a solução.</p>
+                    <ul class="mt-4 space-y-2 text-gray-700">
+                        <li class="flex items-center"><span class="text-orange-500 mr-2 font-bold">✓</span> Protótipos funcionais para validar seu produto.</li>
+                        <li class="flex items-center"><span class="text-orange-500 mr-2 font-bold">✓</span> Reparos de peças plásticas que você não encontra mais.</li>
+                        <li class="flex items-center"><span class="text-orange-500 mr-2 font-bold">✓</span> Criação de produtos exclusivos e personalizados.</li>
+                        <li class="flex items-center"><span class="text-orange-500 mr-2 font-bold">✓</span> Lembrancinhas únicas para eventos e empresas.</li>
+                    </ul>
+                </div>
+                <div class="text-center p-4 rounded-lg bg-gray-100">
+                     <div class="text-8xl">💡</div>
+                     <p class="mt-2 font-semibold text-gray-700">Sua imaginação é o único limite.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="ai-recommender" class="my-10 bg-white p-8 rounded-xl shadow-lg text-center">
+            <h2 class="text-3xl font-bold text-gray-800">✨ Recomendador de Projetos com IA</h2>
+            <p class="text-gray-600 mt-2 max-w-2xl mx-auto">Não tem certeza por onde começar? Descreva seu projeto e nossa IA recomendará os melhores padrões de preenchimento para você.</p>
+            <div class="mt-6 max-w-2xl mx-auto">
+                <textarea id="project-description" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition" rows="4" placeholder="Ex: Preciso de um case para um drone, que seja leve mas muito resistente a quedas e impactos..."></textarea>
+                <button id="get-recommendation-btn" class="mt-4 w-full bg-orange-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-orange-700 transition transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                    Obter Recomendação da IA
+                </button>
+            </div>
+            <div id="ai-results-container" class="mt-6 text-left">
+            </div>
+        </section>
+
+        <section id="explorer" class="my-10">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-bold text-gray-800">CLIQUE para saber MAIS</h2>
+            </div>
+            <div class="flex flex-wrap justify-center gap-3 mb-8">
+                <button data-category="all" class="btn-filter active py-2 px-6 bg-white border border-gray-300 rounded-full font-semibold text-gray-700 hover:bg-gray-100 transition">Todos</button>
+                <button data-category="2d" class="btn-filter py-2 px-6 bg-white border border-gray-300 rounded-full font-semibold text-gray-700 hover:bg-gray-100 transition">2D (Rápidos)</button>
+                <button data-category="3d" class="btn-filter py-2 px-6 bg-white border border-gray-300 rounded-full font-semibold text-gray-700 hover:bg-gray-100 transition">3D (Resistentes)</button>
+                <button data-category="special" class="btn-filter py-2 px-6 bg-white border border-gray-300 rounded-full font-semibold text-gray-700 hover:bg-gray-100 transition">Especiais</button>
+            </div>
+            <div id="patterns-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            </div>
+        </section>
+
+        <section id="comparison-tool" class="my-20 bg-white p-8 rounded-xl shadow-lg">
+            <div class="text-center mb-8">
+                 <h2 class="text-3xl font-bold text-gray-800">Ferramenta de Comparação</h2>
+                 <p class="text-gray-600 mt-2 max-w-2xl mx-auto">Selecione até 3 padrões na lista abaixo para uma análise visual comparativa. Entenda as trocas entre velocidade, resistência, economia e complexidade.</p>
+            </div>
+            <div class="lg:flex lg:gap-8">
+                <div class="lg:w-1/4 mb-8 lg:mb-0">
+                    <h3 class="font-bold text-lg mb-3">Selecione para comparar:</h3>
+                    <div id="comparison-checklist" class="space-y-2 max-h-96 overflow-y-auto pr-2"></div>
+                </div>
+                <div class="lg:w-3/4">
+                    <div class="chart-container">
+                        <canvas id="comparisonChart"></canvas>
+                    </div>
+                     <div id="comparison-details" class="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="contact" class="my-20 bg-gray-800 text-white p-12 rounded-lg shadow-xl text-center">
+            <h2 class="text-4xl font-bold">Pronto para dar o próximo passo?</h2>
+            <p class="mt-4 text-lg max-w-2xl mx-auto text-gray-300">Sua ideia merece se tornar realidade. Uma simples conversa pode ser o início de um grande projeto. Fale diretamente conosco e receba uma consultoria gratuita para sua necessidade.</p>
+            <a href="https://wa.me/5519996353136" target="_blank" rel="noopener noreferrer" class="mt-8 inline-block bg-orange-500 text-white font-bold py-4 px-10 rounded-lg text-xl hover:bg-orange-600 transition transform hover:scale-105 shadow-lg">
+                Iniciar Conversa no WhatsApp
+            </a>
+            <p class="mt-4 text-sm text-gray-400">Clique e seja redirecionado para um bate-papo conosco!</p>
+        </section>
+    </main>
+
+    <footer class="text-center py-6 mt-10 border-t">
+        <p class="text-gray-500">Guia criado para otimizar seus projetos de impressão 3D.</p>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const header = document.querySelector('header');
+            const headerContent = header.querySelector('div');
+            const headerH1 = header.querySelector('h1');
+            const originalH1HTML = headerH1.innerHTML;
+            const scrolledH1HTML = '<span class="text-orange-600">Salto em 3D</span>';
+
+            headerContent.classList.add('animate-fade-in-down');
+
+            window.addEventListener('scroll', () => {
+                if (window.scrollY > 50) {
+                    header.classList.add('header-scrolled');
+                    if (headerH1.innerHTML !== scrolledH1HTML) {
+                        headerH1.innerHTML = scrolledH1HTML;
+                    }
+                } else {
+                    header.classList.remove('header-scrolled');
+                    if (headerH1.innerHTML !== originalH1HTML) {
+                        headerH1.innerHTML = originalH1HTML;
+                    }
+                }
+            }, { passive: true });
+
+            const infillData = {
+                rectilinear: { name: "Rectilinear (Retilíneo)", category: "2d", how: "Cria uma grade de linhas paralelas em uma camada, com a direção das linhas alternando em 90 graus a cada camada.", ideal: "Impressões rápidas e de uso geral, onde a resistência não é a principal preocupação.", advantages: "Muito rápido de imprimir.", disadvantages: "Oferece resistência principalmente em duas direções, podendo ser fraco em outras.", scores: { Velocidade: 10, Resistência: 3, Economia: 9, Complexidade: 1 } },
+                aligned_rectilinear: { name: "Aligned Rectilinear", category: "2d", how: "Similar ao Rectilinear, mas as linhas são alinhadas umas sobre as outras em todas as camadas, criando canais internos.", ideal: "Aplicações específicas onde se deseja um fluxo de ar ou líquido através da peça.", advantages: "Permite a criação de canais internos.", disadvantages: "Resistência muito baixa.", scores: { Velocidade: 9, Resistência: 1, Economia: 9, Complexidade: 2 } },
+                grid: { name: "Grid (Grade)", category: "2d", how: "Imprime uma grade de linhas perpendiculares na mesma camada, parecendo uma malha.", ideal: "Peças que precisam de uma boa resistência em duas dimensões. É um bom padrão de uso geral.", advantages: "Mais resistente que o Rectilinear, boa velocidade de impressão.", disadvantages: "Pode causar acúmulo de material e ruído nos cruzamentos das linhas.", scores: { Velocidade: 8, Resistência: 6, Economia: 8, Complexidade: 3 } },
+                line: { name: "Line (Linha)", category: "2d", how: "Semelhante ao Rectilinear, mas as linhas são impressas na mesma direção em todas as camadas.", ideal: "Impressões muito rápidas onde a resistência interna é mínima.", advantages: "Extremamente rápido.", disadvantages: "Muito fraco, pois não há cruzamento de linhas para dar suporte.", scores: { Velocidade: 10, Resistência: 1, Economia: 9, Complexidade: 1 } },
+                concentric: { name: "Concentric (Concêntrico)", category: "2d", how: "Cria anéis que seguem o contorno das paredes externas da peça, movendo-se para o centro.", ideal: "Peças flexíveis ou que precisam de resistência nas paredes.", advantages: "Rápido de imprimir, bom para peças que precisam de flexibilidade.", disadvantages: "A parte central da peça pode ser mais fraca.", scores: { Velocidade: 7, Resistência: 4, Economia: 7, Complexidade: 5 } },
+                honeycomb: { name: "Honeycomb (Favo de Mel)", category: "2d", how: "Cria uma estrutura interna de hexágonos, semelhante a um favo de mel.", ideal: "Peças que necessitam de uma boa relação entre resistência e peso.", advantages: "Boa resistência à compressão e ao cisalhamento.", disadvantages: "Pode consumir mais tempo de impressão do que padrões mais simples.", scores: { Velocidade: 5, Resistência: 8, Economia: 6, Complexidade: 7 } },
+                tri_hexagon: { name: "Tri-Hexagon", category: "2d", how: "Combina hexágonos e triângulos, com linhas que se estendem em três direções no plano XY.", ideal: "Peças que precisam de alta resistência em duas dimensões.", advantages: "Muito resistente a forças aplicadas nas laterais.", disadvantages: "Leva mais tempo para imprimir do que o Honeycomb.", scores: { Velocidade: 4, Resistência: 9, Economia: 5, Complexidade: 8 } },
+                triangles: { name: "Triangles (Triângulos)", category: "2d", how: "Cria uma grade de triângulos.", ideal: "Peças que precisam de alta resistência em duas dimensões.", advantages: "Forte em direções bidirecionais.", disadvantages: "Mais lento de imprimir do que padrões mais simples.", scores: { Velocidade: 5, Resistência: 8, Economia: 6, Complexidade: 6 } },
+                cross_hatch: { name: "Cross Hatch", category: "2d", how: "É um padrão de linhas cruzadas, geralmente a 45 graus, criando uma malha diagonal.", ideal: "Peças que precisam de boa resistência em múltiplas direções no plano 2D.", advantages: "Boa resistência à torção.", disadvantages: "Semelhante ao Grid, pode ter problemas nos cruzamentos das linhas.", scores: { Velocidade: 7, Resistência: 7, Economia: 7, Complexidade: 4 } },
+                octagram_spiral: { name: "Octagram Spiral", category: "2d", how: "Cria uma espiral em forma de estrela de oito pontas.", ideal: "Fins estéticos, especialmente quando o preenchimento ficará visível.", advantages: "Aparência visual interessante.", disadvantages: "Aumenta o tempo de impressão e não é otimizado para resistência.", scores: { Velocidade: 3, Resistência: 2, Economia: 4, Complexidade: 9 } },
+                archimedean_chords: { name: "Archimedean Chords", category: "2d", how: "Gera um padrão de espiral a partir do centro.", ideal: "Peças com geometrias circulares ou para fins estéticos.", advantages: "Aparência única, pode ser útil para peças com flexibilidade.", disadvantages: "Não é projetado para resistência mecânica.", scores: { Velocidade: 4, Resistência: 2, Economia: 5, Complexidade: 8 } },
+                hilbert_curve: { name: "Hilbert Curve", category: "2d", how: "Utiliza uma curva fractal que preenche o espaço.", ideal: "Aplicações artísticas e para criar um visual único.", advantages: "Aparência não convencional e interessante.", disadvantages: "Aumenta consideravelmente o tempo de impressão e não oferece boa resistência.", scores: { Velocidade: 2, Resistência: 3, Economia: 3, Complexidade: 10 } },
+                cubic: { name: "Cubic (Cúbico)", category: "3d", how: "Cria cubos empilhados e inclinados, distribuindo a força de maneira mais uniforme.", ideal: "Peças que precisam de boa resistência em todas as direções (X, Y e Z).", advantages: "Boa resistência geral e tempo de impressão razoável.", disadvantages: "Pode consumir mais material do que os padrões 2D.", scores: { Velocidade: 6, Resistência: 8, Economia: 6, Complexidade: 5 } },
+                gyroid: { name: "Gyroid (Giroide)", category: "3d", how: "Um padrão 3D complexo e ondulado que oferece resistência uniforme em todas as direções.", ideal: "Peças que precisam de alta resistência e alguma flexibilidade, além de ser ótimo para o fluxo de líquidos ou gases.", advantages: "Excelente resistência em todas as direções, rápido de imprimir por não ter cruzamentos de linhas.", disadvantages: "Pode ser computacionalmente mais pesado para o fatiador.", scores: { Velocidade: 7, Resistência: 10, Economia: 7, Complexidade: 9 } },
+                honeycomb_3d: { name: "3D Honeycomb", category: "3d", how: "Uma variação do Honeycomb que cria hexágonos em três dimensões.", ideal: "Peças que precisam de uma excelente relação resistência-peso.", advantages: "Muito resistente.", disadvantages: "Aumenta o tempo de impressão.", scores: { Velocidade: 4, Resistência: 9, Economia: 5, Complexidade: 8 } },
+                lightning: { name: "Lightning (Relâmpago)", category: "special", how: "Cria uma estrutura de suporte interna que se parece com um relâmpago, sendo mais densa perto do topo da peça.", ideal: "Protótipos rápidos, modelos visuais e peças que não precisam de resistência interna.", advantages: "Economiza muito material e tempo de impressão.", disadvantages: "A peça fica quase oca, com resistência interna muito baixa.", scores: { Velocidade: 9, Resistência: 2, Economia: 10, Complexidade: 4 } },
+                support_cubic: { name: "Support Cubic", category: "special", how: "É uma variação do preenchimento Cúbico que cria uma estrutura de suporte interna, mais esparsa.", ideal: "Economizar material e tempo em peças que precisam de suporte interno, mas não de alta resistência.", advantages: "Mais rápido e econômico que o Cúbico padrão.", disadvantages: "Menor resistência.", scores: { Velocidade: 8, Resistência: 5, Economia: 9, Complexidade: 5 } },
+                adaptive_cubic: { name: "Adaptive Cubic", category: "special", how: "Uma variação inteligente do padrão Cúbico. A densidade do preenchimento aumenta à medida que se aproxima das paredes da peça.", ideal: "Peças grandes, economizando material e tempo sem comprometer muito a resistência.", advantages: "Otimiza o uso de material, mantendo a resistência onde é mais necessária.", disadvantages: "Pode ser um pouco mais lento de fatiar.", scores: { Velocidade: 7, Resistência: 7, Economia: 8, Complexidade: 6 } }
+            };
+
+            const grid = document.getElementById('patterns-grid');
+            const checklist = document.getElementById('comparison-checklist');
+            const modal = document.getElementById('modal-template');
+            const comparisonDetails = document.getElementById('comparison-details');
+            const recommendationBtn = document.getElementById('get-recommendation-btn');
+            const projectDescription = document.getElementById('project-description');
+            const aiResultsContainer = document.getElementById('ai-results-container');
+            let comparisonChart;
+
+            function renderGrid(filter = 'all') {
+                grid.innerHTML = '';
+                Object.entries(infillData).forEach(([key, data]) => {
+                    if (filter !== 'all' && data.category !== filter) return;
+                    const card = document.createElement('div');
+                    card.className = 'bg-white p-4 rounded-lg shadow-md hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer';
+                    card.dataset.key = key;
+                    card.innerHTML = `<canvas class="card-canvas" width="150" height="100"></canvas><h3 class="mt-3 font-bold text-lg text-gray-800">${data.name}</h3>`;
+                    grid.appendChild(card);
+                    const canvas = card.querySelector('.card-canvas');
+                    drawPatternPreview(canvas, key);
+                    card.addEventListener('click', () => openModal(key));
+                });
+            }
+
+            function drawPatternPreview(canvas, patternKey) {
+                const ctx = canvas.getContext('2d');
+                const w = canvas.width;
+                const h = canvas.height;
+                ctx.clearRect(0, 0, w, h);
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 1.5;
+                const step = 15;
+                ctx.beginPath();
+                switch (patternKey) {
+                    case 'rectilinear':
+                    case 'line':
+                    case 'aligned_rectilinear':
+                        for (let i = step; i < w; i += step) { ctx.moveTo(i, 0); ctx.lineTo(i, h); }
+                        break;
+                    case 'grid':
+                    case 'cross_hatch':
+                        for (let i = step; i < w; i += step) { ctx.moveTo(i, 0); ctx.lineTo(i, h); }
+                        for (let j = step; j < h; j += step) { ctx.moveTo(0, j); ctx.lineTo(w, j); }
+                        break;
+                    case 'gyroid':
+                        for (let i = 0; i < w; i += 4) {
+                            ctx.moveTo(i, h / 2 + Math.sin(i / 15 + Math.PI) * h / 2.5);
+                            ctx.bezierCurveTo(i + 8, h / 2 + Math.sin(i / 15 + Math.PI) * h / 2.5 - h / 4, i + 8, h / 2 + Math.sin(i / 15) * h / 2.5 + h / 4, i, h / 2 + Math.sin(i / 15) * h / 2.5);
+                        }
+                        break;
+                    case 'honeycomb':
+                    case 'honeycomb_3d':
+                        const r = 15;
+                        const s = r * Math.sqrt(3);
+                        for (let y = -r; y < h + r; y += s) {
+                            for (let x = -r, i = 0; x < w + r; x += 1.5 * r, i++) {
+                                let cy = y + (i % 2 === 0 ? s / 2 : 0);
+                                ctx.moveTo(x + r, cy);
+                                ctx.lineTo(x + 1.5 * r, cy + s / 2);
+                                ctx.lineTo(x + r, cy + s);
+                                ctx.lineTo(x, cy + s);
+                                ctx.lineTo(x - 0.5 * r, cy + s / 2);
+                                ctx.lineTo(x, cy);
+                            }
+                        }
+                        break;
+                    case 'triangles':
+                        for (let i = -w; i < w; i += step) { ctx.moveTo(i, 0); ctx.lineTo(i + h, h); ctx.moveTo(i + h, 0); ctx.lineTo(i, h); }
+                        break;
+                    case 'tri_hexagon':
+                        for (let i = 0; i < w + h; i += step) { ctx.moveTo(i, 0); ctx.lineTo(0, i); ctx.moveTo(0, i); ctx.lineTo(w - i, h); ctx.moveTo(w - i, h); ctx.lineTo(w, h - i); }
+                        break;
+                    case 'concentric':
+                        for (let i = 5; i < Math.min(w, h) / 2; i += 10) { ctx.rect(i, i, w - 2 * i, h - 2 * i); }
+                        break;
+                    case 'lightning':
+                        ctx.moveTo(w / 2, 0);
+                        let currentY = 0;
+                        while (currentY < h) {
+                            let nextX = Math.random() * w;
+                            let nextY = currentY + Math.random() * 20 + 10;
+                            ctx.lineTo(nextX, nextY);
+                            currentY = nextY;
+                        }
+                        break;
+                    default: 
+                        for (let i = 0; i < w + h; i += step * 1.5) { ctx.moveTo(i, 0); ctx.lineTo(0, i); }
+                        for (let i = 0; i < w + h; i += step * 1.5) { ctx.moveTo(w - i, 0); ctx.lineTo(w, i); }
+                        break;
+                }
+                ctx.stroke();
+            }
+
+            function openModal(key) {
+                const data = infillData[key];
+                if (!data) return;
+                document.getElementById('modal-title').textContent = data.name;
+                document.getElementById('modal-how').textContent = data.how;
+                document.getElementById('modal-ideal').textContent = data.ideal;
+                document.getElementById('modal-advantages').textContent = data.advantages;
+                document.getElementById('modal-disadvantages').textContent = data.disadvantages;
+                modal.classList.add('is-open');
+            }
+
+            document.getElementById('modal-close').addEventListener('click', () => modal.classList.remove('is-open'));
+            modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('is-open'); });
+            
+            document.querySelectorAll('.btn-filter').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelector('.btn-filter.active').classList.remove('active');
+                    btn.classList.add('active');
+                    renderGrid(btn.dataset.category);
+                });
+            });
+
+            function populateChecklist() {
+                Object.entries(infillData).forEach(([key, data]) => {
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center space-x-3 p-2 rounded-md hover:bg-gray-100 cursor-pointer';
+                    label.innerHTML = `<input type="checkbox" data-key="${key}" class="h-4 w-4 rounded border-gray-300 text-orange-600 focus:ring-orange-500"><span class="text-sm">${data.name}</span>`;
+                    checklist.appendChild(label);
+                });
+            }
+            
+            function initializeChart() {
+                const ctx = document.getElementById('comparisonChart').getContext('2d');
+                comparisonChart = new Chart(ctx, {
+                    type: 'radar',
+                    data: { labels: ['Velocidade', 'Resistência', 'Economia', 'Complexidade'], datasets: [] },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        scales: { r: { angleLines: { display: true }, suggestedMin: 0, suggestedMax: 10, pointLabels: { font: { size: 12 } } } },
+                        plugins: { legend: { position: 'top' }, tooltip: { callbacks: { title: (items) => items[0].dataset.label } } }
+                    }
+                });
+            }
+
+            function updateComparison() {
+                const selected = Array.from(document.querySelectorAll('#comparison-checklist input:checked'));
+                if (selected.length > 3) {
+                    this.checked = false;
+                    alert('Selecione no máximo 3 padrões.');
+                    return;
+                }
+                const colors = ['#f97316', '#db2777', '#16a34a'];
+                comparisonChart.data.datasets = selected.map((checkbox, i) => {
+                    const key = checkbox.dataset.key;
+                    const data = infillData[key];
+                    return { label: data.name, data: Object.values(data.scores), borderColor: colors[i], backgroundColor: `${colors[i]}33`, borderWidth: 2, pointBackgroundColor: colors[i] };
+                });
+                comparisonChart.update();
+                comparisonDetails.innerHTML = '';
+                selected.forEach((checkbox, i) => {
+                    const key = checkbox.dataset.key;
+                    const data = infillData[key];
+                    const detailDiv = document.createElement('div');
+                    detailDiv.style.borderColor = colors[i];
+                    detailDiv.className = 'border-l-4 pl-3';
+                    detailDiv.innerHTML = `<h4 class="font-bold text-md" style="color:${colors[i]}">${data.name}</h4><p class="text-sm text-green-700 mt-1"><strong>Vantagem:</strong> ${data.advantages}</p><p class="text-sm text-red-700 mt-1"><strong>Desvantagem:</strong> ${data.disadvantages}</p>`;
+                    comparisonDetails.appendChild(detailDiv);
+                });
+            }
+            
+            async function getAiRecommendation() {
+                const description = projectDescription.value;
+                if (!description.trim()) {
+                    aiResultsContainer.innerHTML = `<div class="text-red-600">Por favor, descreva seu projeto.</div>`;
+                    return;
+                }
+
+                aiResultsContainer.innerHTML = `<div class="loader"></div>`;
+                recommendationBtn.disabled = true;
+
+                const apiKey = "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+                const simplifiedInfillData = Object.fromEntries(
+                    Object.entries(infillData).map(([key, value]) => [key, { name: value.name, ideal: value.ideal, advantages: value.advantages }])
+                );
+                
+                const systemPrompt = `Você é um especialista em impressão 3D FDM. Sua tarefa é recomendar os 3 melhores padrões de preenchimento para uma descrição de projeto. Você deve basear suas recomendações nos dados de padrões fornecidos. Para cada recomendação, forneça um motivo conciso e orientado para os negócios, com no máximo 2 frases. Sua resposta deve ser em português do Brasil e estar em um formato JSON válido, contendo um array de objetos. Cada objeto deve ter as chaves "pattern_key" (que deve corresponder exatamente a uma das chaves nos dados fornecidos) e "reasoning".\n\nDados dos Padrões Disponíveis: ${JSON.stringify(simplifiedInfillData)}`;
+                const userQuery = `Descrição do Projeto: "${description}"`;
+
+                const payload = {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "ARRAY",
+                            items: {
+                                type: "OBJECT",
+                                properties: {
+                                    pattern_key: { type: "STRING" },
+                                    reasoning: { type: "STRING" }
+                                },
+                                required: ["pattern_key", "reasoning"]
+                            }
+                        }
+                    }
+                };
+                
+                try {
+                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    if (!response.ok) {
+                        throw new Error(`API Error: ${response.statusText}`);
+                    }
+                    const result = await response.json();
+                    const jsonText = result.candidates[0].content.parts[0].text;
+                    const recommendations = JSON.parse(jsonText);
+
+                    aiResultsContainer.innerHTML = `<h3 class="font-bold text-lg mb-2">Recomendações da IA:</h3>`;
+                    recommendations.forEach(rec => {
+                        if (infillData[rec.pattern_key]) {
+                            const recDiv = document.createElement('div');
+                            recDiv.className = 'bg-orange-50 border border-orange-200 p-4 rounded-lg mt-3 cursor-pointer hover:bg-orange-100 transition';
+                            recDiv.dataset.key = rec.pattern_key;
+                            recDiv.innerHTML = `<h4 class="font-bold text-orange-800">${infillData[rec.pattern_key].name}</h4><p class="text-orange-900 mt-1">${rec.reasoning}</p>`;
+                            recDiv.addEventListener('click', () => openModal(rec.pattern_key));
+                            aiResultsContainer.appendChild(recDiv);
+                        }
+                    });
+
+                } catch (error) {
+                    aiResultsContainer.innerHTML = `<div class="text-red-600">Desculpe, ocorreu um erro ao obter a recomendação. Por favor, tente novamente.</div>`;
+                } finally {
+                    recommendationBtn.disabled = false;
+                }
+            }
+
+            recommendationBtn.addEventListener('click', getAiRecommendation);
+            checklist.addEventListener('change', (e) => { if (e.target.type === 'checkbox') updateComparison.call(e.target); });
+            
+            renderGrid();
+            populateChecklist();
+            initializeChart();
+        });
+    </script>
+</body>
+</html>
+
+
+
